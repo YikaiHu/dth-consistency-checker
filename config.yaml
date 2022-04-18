@@ -1,0 +1,33 @@
+taskID:
+dthDynamoDB:
+
+
+srcType: Amazon_S3
+srcBucket: dth-recive-cn-north-1
+srcPrefix: case1
+srcRegion: cn-north-1
+srcEndpoint:
+srcCredential: cn-credential
+srcInCurrentAccount: false
+skipCompare: false
+
+destBucket: dth-us-west-2
+destPrefix:
+destRegion: us-west-2
+destCredential:
+destStorageClass: STANDARD
+destInCurrentAccount: true
+destAcl: bucket-owner-full-control
+
+jobTableName: test-table
+jobQueueName: test-queue
+
+options:
+  chunkSize: 5
+  multipartThreshold: 10
+  maxKeys: 1000
+  messageBatchSize: 10
+  finderDepth: 0
+  finderNumber: 1
+  workerNumber: 4
+  includeMetadata: false
