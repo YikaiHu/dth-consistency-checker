@@ -20,10 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +60,7 @@ type Finder struct {
 // Comparator compares the differences of source and destination and log the objects into file.
 type Comparator struct {
 	srcClient, desClient Client
+	db                   *DBService
 	cfg                  *JobConfig
 }
 
@@ -110,6 +111,57 @@ func getCredentials(ctx context.Context, param string, inCurrentAccount bool, sm
 	}
 	return cred
 }
+
+// List objects in destination bucket, load the full list into a map
+func getTaskConfig(ctx context.Context, cfg *JobConfig, db *DBService) {
+	task, _ := db.QueryTask(ctx, &cfg.TaskID)
+	if task != nil {
+		log.Print("Get Task Configuration:")
+		for i := 0; i < len(task.Parameters); i++{
+			updateConfig(ctx, cfg, task.Parameters[i].ParameterKey, task.Parameters[i].ParameterValue)
+		}
+	}
+	return
+}
+
+func updateConfig(ctx context.Context, cfg *JobConfig, parameterKey string, parameterValue string){
+	log.Printf("Parameter: %s, Value: %s", parameterKey, parameterValue)
+	switch parameterKey {
+	case "srcType":
+		cfg.SrcType = parameterValue
+	case "srcEndpoint":
+		cfg.SrcEndpoint = parameterValue
+	case "srcBucket":
+		cfg.SrcBucket = parameterValue
+	case "srcPrefix":
+		cfg.SrcPrefix = parameterValue
+	case "srcPrefixsListFile":
+		cfg.SrcPrefixList = parameterValue
+	case "srcRegion":
+		cfg.SrcRegion = parameterValue
+	case "srcInCurrentAccount":
+		cfg.SrcInCurrentAccount, _ = strconv.ParseBool(parameterValue)
+	case "srcCredentials":
+		cfg.SrcCredential = parameterValue
+	case "destBucket":
+		cfg.DestBucket = parameterValue
+	case "destPrefix":
+		cfg.DestPrefix = parameterValue
+	case "destRegion":
+		cfg.DestRegion = parameterValue
+	case "destInCurrentAccount":
+		cfg.DestInCurrentAccount, _ = strconv.ParseBool(parameterValue)
+	case "destCredentials":
+		cfg.DestCredential = parameterValue
+	case "finderDepth":
+		cfg.FinderDepth, _ = strconv.Atoi(parameterValue)
+	case "finderNumber":
+		cfg.FinderNumber, _ = strconv.Atoi(parameterValue)
+	}
+	return
+}
+
+
 
 // NewFinder creates a new Finder instance
 func NewFinder(ctx context.Context, cfg *JobConfig) (f *Finder) {
@@ -404,11 +456,15 @@ func (f *Finder) directSend(ctx context.Context, prefix *string, batchCh chan st
 }
 
 // NewComparator creates a new Comparator instance
-func NewComparator(ctx context.Context, cfg *JobConfig) (f *Comparator) {
+func NewComparator(ctx context.Context, cfg *JobConfig) (c *Comparator) {
 	sm, err := NewSecretService(ctx)
 	if err != nil {
 		log.Printf("Warning - Unable to load credentials, use default setting - %s\n", err.Error())
 	}
+	db, _ := NewDBService(ctx, cfg.DthTaskTableName)
+
+	getTaskConfig(ctx, cfg, db)
+
 
 	srcCred := getCredentials(ctx, cfg.SrcCredential, cfg.SrcInCurrentAccount, sm)
 	desCred := getCredentials(ctx, cfg.DestCredential, cfg.DestInCurrentAccount, sm)
@@ -416,16 +472,19 @@ func NewComparator(ctx context.Context, cfg *JobConfig) (f *Comparator) {
 	srcClient := NewS3Client(ctx, cfg.SrcBucket, cfg.SrcPrefix, cfg.SrcPrefixList, cfg.SrcEndpoint, cfg.SrcRegion, cfg.SrcType, srcCred)
 	desClient := NewS3Client(ctx, cfg.DestBucket, cfg.DestPrefix, "", "", cfg.DestRegion, "Amazon_S3", desCred)
 
-	f = &Comparator{
+	c = &Comparator{
 		srcClient: srcClient,
 		desClient: desClient,
+		db:        db,
 		cfg:       cfg,
 	}
 	return
 }
 
-// Run is main execution function for Finder.
-func (f *Comparator) Run(ctx context.Context) {
+// Run is main execution function for Comparator.
+func (c *Comparator) Run(ctx context.Context) {
+
+	log.Printf("value: %s", c.cfg.DestBucket)
 
 	// Maximum number of queued batches to be sent to SQS
 	var bufferSize int = 500
@@ -435,29 +494,26 @@ func (f *Comparator) Run(ctx context.Context) {
 	batchCh := make(chan struct{}, bufferSize)
 
 	// Channel to buffer the messages
-	msgCh := make(chan *string, bufferSize*f.cfg.MessageBatchSize)
+	msgCh := make(chan *string, bufferSize*c.cfg.MessageBatchSize)
 
 	// Maximum number of finder threads in parallel
 	// Create a channel to block
 	// Note that bigger number needs more memory
-	compareCh := make(chan struct{}, f.cfg.FinderNumber)
+	compareCh := make(chan struct{}, c.cfg.FinderNumber)
 
 	var prefixes []*string
-	log.Printf("Prefix List File: %s", f.cfg.SrcPrefixList)
+	log.Printf("Prefix List File: %s", c.cfg.SrcPrefixList)
 
-	if len(f.cfg.SrcPrefixList) > 0 {
-		prefixes = f.srcClient.ListSelectedPrefixes(ctx, &f.cfg.SrcPrefixList)
+	if len(c.cfg.SrcPrefixList) > 0 {
+		prefixes = c.srcClient.ListSelectedPrefixes(ctx, &c.cfg.SrcPrefixList)
 	} else {
-		prefixes = f.srcClient.ListCommonPrefixes(ctx, f.cfg.FinderDepth, f.cfg.MaxKeys)
+		prefixes = c.srcClient.ListCommonPrefixes(ctx, c.cfg.FinderDepth, c.cfg.MaxKeys)
 	}
+
 	var wg sync.WaitGroup
 
-	f.cfg.DestBucket = "dth-us-east-1"
-
-	fmt.Printf("!!!!!!!!!destbucket: %s\n", f.cfg.DestBucket)
-
 	start := time.Now()
-	filename := f.cfg.SrcBucket + "_" + f.cfg.SrcPrefix + "_" + start.Format("2006-01-02-15:04:05") + ".txt"
+	filename := c.cfg.SrcBucket + "_" + c.cfg.SrcPrefix + "_" + start.Format("2006-01-02-15:04:05") + ".txt"
 	file, err := os.Create(filename)
 	if err != nil {
 		panic(err)
@@ -467,7 +523,7 @@ func (f *Comparator) Run(ctx context.Context) {
 		compareCh <- struct{}{}
 		log.Printf("prefix: %s", *p)
 		wg.Add(1)
-		go f.compareAndLog(ctx, filename, file, p, batchCh, msgCh, compareCh, &wg)
+		go c.compareAndLog(ctx, filename, file, p, batchCh, msgCh, compareCh, &wg)
 	}
 	wg.Wait()
 
@@ -484,16 +540,9 @@ func (f *Comparator) Run(ctx context.Context) {
 }
 
 // List objects in destination bucket, load the full list into a map
-func (f *Comparator) getTaskConfig(ctx context.Context) {
+func (c *Comparator) getTargetObjects(ctx context.Context, prefix *string) (objects map[string]*int64) {
 
-
-	return
-}
-
-// List objects in destination bucket, load the full list into a map
-func (f *Comparator) getTargetObjects(ctx context.Context, prefix *string) (objects map[string]*int64) {
-
-	destPrefix := appendPrefix(prefix, &f.cfg.DestPrefix)
+	destPrefix := appendPrefix(prefix, &c.cfg.DestPrefix)
 	log.Printf("Scanning in destination prefix /%s\n", *destPrefix)
 
 	token := ""
@@ -502,7 +551,7 @@ func (f *Comparator) getTargetObjects(ctx context.Context, prefix *string) (obje
 	i := 0
 	batch := 10
 	for token != "End" {
-		tar, err := f.desClient.ListObjects(ctx, &token, destPrefix, f.cfg.MaxKeys)
+		tar, err := c.desClient.ListObjects(ctx, &token, destPrefix, c.cfg.MaxKeys)
 		if err != nil {
 			log.Fatalf("Error listing objects in destination bucket - %s\n", err.Error())
 		}
@@ -511,7 +560,7 @@ func (f *Comparator) getTargetObjects(ctx context.Context, prefix *string) (obje
 
 		for _, obj := range tar {
 			// fmt.Printf("key is %s, size is %d\n", job.Key, job.Size)
-			srcKey := removePrefix(&obj.Key, &f.cfg.DestPrefix)
+			srcKey := removePrefix(&obj.Key, &c.cfg.DestPrefix)
 			objects[*srcKey] = &obj.Size
 		}
 		i++
@@ -525,17 +574,16 @@ func (f *Comparator) getTargetObjects(ctx context.Context, prefix *string) (obje
 
 // This function will compare source and target and get a list of delta,
 // and then send delta to SQS Queue.
-func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *os.File, prefix *string, batchCh chan struct{}, msgCh chan *string, compareCh chan struct{}, wg *sync.WaitGroup) {
+func (c *Comparator) compareAndLog(ctx context.Context, filename string, file *os.File, prefix *string, batchCh chan struct{}, msgCh chan *string, compareCh chan struct{}, wg *sync.WaitGroup) {
 	//timeString := strconv.FormatInt(time.Now().Unix(), 10)
 
 	defer wg.Done()
 
-
 	log.Printf("Comparing within prefix /%s\n", *prefix)
-	target := f.getTargetObjects(ctx, prefix)
+	target := c.getTargetObjects(ctx, prefix)
 
 	token := ""
-	i, j, count := 0, 0, 0
+	i, j := 0, 0
 	retry := 0
 	// batch := make([]*string, f.cfg.MessageBatchSize)
 
@@ -544,7 +592,7 @@ func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *o
 
 	for token != "End" {
 		// source := f.getSourceObjects(ctx, &token, prefix)
-		source, err := f.srcClient.ListObjects(ctx, &token, prefix, f.cfg.MaxKeys)
+		source, err := c.srcClient.ListObjects(ctx, &token, prefix, c.cfg.MaxKeys)
 		if err != nil {
 			log.Printf("Fail to get source list - %s\n", err.Error())
 			//
@@ -573,7 +621,7 @@ func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *o
 				// batch[i] = obj.toString()
 				msgCh <- obj.toString()
 				i++
-				if i%f.cfg.MessageBatchSize == 0 {
+				if i%c.cfg.MessageBatchSize == 0 {
 					wg.Add(1)
 					j++
 					if j%100 == 0 {
@@ -586,15 +634,14 @@ func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *o
 						defer wg.Done()
 						batch := make([]*string, i)
 						for a := 0; a < i; a++ {
-							count ++
 							batch[a] = <-msgCh
-							if _, err := file.WriteString(*batch[a] + "\n" ); err != nil {
+							if _, err := file.WriteString(*batch[a] + "\n"); err != nil {
 								panic(err)
 							}
 							//log.Printf("Different File name: %s", *batch[a])
 						}
 						<-batchCh
-					}(f.cfg.MessageBatchSize)
+					}(c.cfg.MessageBatchSize)
 					i = 0
 				}
 			}
@@ -609,9 +656,8 @@ func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *o
 			defer wg.Done()
 			batch := make([]*string, i)
 			for a := 0; a < i; a++ {
-				count ++
 				batch[a] = <-msgCh
-				if _, err := file.WriteString(*batch[a] + "\n" ); err != nil {
+				if _, err := file.WriteString(*batch[a] + "\n"); err != nil {
 					panic(err)
 				}
 				//log.Printf("Different File name: %s", *batch[a])
@@ -620,12 +666,10 @@ func (f *Comparator) compareAndLog(ctx context.Context, filename string, file *o
 		}(i)
 	}
 
-	// end := time.Since(start)
-	// log.Printf("Compared and Sent %d batches in %v", j, end)
-	if  j > 0 {
-		log.Printf("Completed in prefix /%s, found %d different objects in total", *prefix, count)
+	if j > 0 {
+		log.Printf("Completed in prefix /%s, found %d different batches in total, batch size is %d", *prefix, j, c.cfg.MessageBatchSize)
 	} else {
-		log.Printf("Completed in prefix /%s, consistency check passed!", *prefix)
+		log.Printf("Completed in prefix /%s, found 0 different objects in total, consistency check passed!", *prefix)
 		e := os.Remove(filename)
 		if e != nil {
 			log.Fatal(e)

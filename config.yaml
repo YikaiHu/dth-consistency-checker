@@ -1,26 +1,6 @@
-taskID:
-dthDynamoDB:
+taskID: 47782a84-8546-4c69-9b0d-271c1610b7dc
+dthTaskTableName: DataTransferHub-APITaskTable658DE9FE-74MXIZUG8YGP
 
-
-srcType: Amazon_S3
-srcBucket: dth-recive-cn-north-1
-srcPrefix: case1
-srcRegion: cn-north-1
-srcEndpoint:
-srcCredential: cn-credential
-srcInCurrentAccount: false
-skipCompare: false
-
-destBucket: dth-us-west-2
-destPrefix:
-destRegion: us-west-2
-destCredential:
-destStorageClass: STANDARD
-destInCurrentAccount: true
-destAcl: bucket-owner-full-control
-
-jobTableName: test-table
-jobQueueName: test-queue
 
 options:
   chunkSize: 5

@@ -87,7 +87,7 @@ func initConfig() {
 	viper.SetDefault("options.workerNumber", dth.DefaultWorkerNumber)
 	viper.SetDefault("options.includeMetadata", false)
 
-	viper.SetDefault("dthDynamoDB", "")
+	viper.SetDefault("dthTaskTableName", "")
 	viper.SetDefault("taskID", "")
 
 	viper.BindEnv("srcType", "SOURCE_TYPE")
@@ -120,7 +120,7 @@ func initConfig() {
 	viper.BindEnv("options.workerNumber", "WORKER_NUMBER")
 	viper.BindEnv("options.includeMetadata", "INCLUDE_METADATA")
 
-	viper.BindEnv("dthDynamoDB", "DTH_DYNAMODB")
+	viper.BindEnv("dthTaskTableName", "DTH_TASK_TABLENAME")
 	viper.BindEnv("taskID", "TASK_ID")
 
 
@@ -171,6 +171,9 @@ func initConfig() {
 		DestInCurrentAccount: viper.GetBool("destInCurrentAccount"),
 		JobTableName:         viper.GetString("jobTableName"),
 		JobQueueName:         viper.GetString("jobQueueName"),
+		DthTaskTableName:         viper.GetString("dthTaskTableName"),
+		TaskID:         viper.GetString("taskID"),
+
 		JobOptions:           options,
 	}
 
@@ -198,8 +201,10 @@ Supported types:
 `,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		if cfg.SrcBucket == "" || cfg.DestBucket == "" {
-			log.Fatalf("Cannot find source or destination bucket name, please check if you have run with a config file or environment variables. Run `dthcli help` for more details")
+		if cfg.TaskID == "" || cfg.DthTaskTableName == "" {
+			if cfg.SrcBucket == "" || cfg.DestBucket == "" {
+				log.Fatalf("Cannot find source or destination bucket name, please check if you have run with a config file or environment variables. Run `dthcli help` for more details")
+			}
 		}
 
 		log.Printf("Start running %s job", jobType)

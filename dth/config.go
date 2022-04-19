@@ -70,6 +70,7 @@ type JobConfig struct {
 	DestBucket, DestPrefix, DestRegion, DestCredential, DestStorageClass, DestAcl       string
 	JobTableName, JobQueueName                                                          string
 	SrcInCurrentAccount, DestInCurrentAccount, SkipCompare                              bool
+	DthTaskTableName, TaskID															string
 	*JobOptions
 }
 

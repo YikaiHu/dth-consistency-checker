@@ -41,6 +41,16 @@ type Item struct {
 	// ExtraInfo               Metadata
 }
 
+// Task holds info about the DTH tasks to be stored in DynamoDB
+type Task struct {
+	Id                                     string `json:"id"`
+	Parameters []struct {
+
+		ParameterValue     					string
+		ParameterKey            			string
+	} `json:"parameters"`
+}
+
 // DBService is a wrapper service used to interact with Amazon DynamoDB
 type DBService struct {
 	tableName string
@@ -435,5 +445,38 @@ func (db *DBService) QueryItem(ctx context.Context, key *string) (*Item, error) 
 		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
 	}
 	return item, nil
+
+}
+
+// QueryTask is a function to query an dth transfer task by taskId in DynamoDB
+func (db *DBService) QueryTask(ctx context.Context, key *string) (*Task, error) {
+	log.Printf("Query item for %s in DynamoDB\n", *key)
+
+	input := &dynamodb.GetItemInput{
+		TableName: &db.tableName,
+		Key: map[string]dtype.AttributeValue{
+			"id": &dtype.AttributeValueMemberS{Value: *key},
+		},
+	}
+	output, err := db.client.GetItem(ctx, input)
+	
+
+	if err != nil {
+		log.Printf("Error querying item for %s in DynamoDB - %s\n", *key, err.Error())
+		return nil, err
+	}
+
+	if output.Item == nil {
+		log.Printf("Item for %s does not exist in DynamoDB", *key)
+		return nil, nil
+	}
+
+	task := &Task{}
+
+	err = attributevalue.UnmarshalMap(output.Item, task)
+	if err != nil {
+		log.Printf("Failed to unmarshal Dynamodb Query result, %v", err)
+	}
+	return task, nil
 
 }
