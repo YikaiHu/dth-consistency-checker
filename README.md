@@ -49,7 +49,8 @@ The job information such as Source Bucket, Destination Bucket etc. are provided 
 
 An example of full config file can be found [here](./config-example.yaml) 
 
-You must provide at least the minimum information as below:
+If you are running Worker job for Finder job, 
+you must provide at least the minimum information as below:
 ```yaml
 srcBucket: src-bucket
 srcRegion: us-west-2
@@ -59,6 +60,13 @@ destRegion: cn-north-1
 
 jobTableName: test-table
 jobQueueName: test-queue
+```
+
+If you are running Comparator job,
+you must provide at least the minimum information as below:
+```yaml
+taskID: 47782a84-8546-4c69-9b0d-271c1610b7dc
+dthTaskTableName: DataTransferHub-APITaskTable658DE9FE-xxxxxxxxxxx
 ```
 
 By default, this tool will try to read a `config.yaml` in the same folder, if you create the configuration file in a different folder or with a different file name, please use extra option `--config xxx.yaml` to load your config file.
@@ -98,4 +106,10 @@ To actually start the job, use `dthcli run` command.
 
 ```
 ./dthcli run -t Worker
+```
+
+- Start Comparator Job
+
+```
+./dthcli run -t Comparator
 ```
