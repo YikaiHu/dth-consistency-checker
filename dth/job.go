@@ -513,7 +513,9 @@ func (c *Comparator) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	start := time.Now()
-	filename := c.cfg.SrcBucket + "_" + c.cfg.SrcPrefix + "_" + start.Format("2006-01-02-15:04:05") + ".txt"
+	rawFilename := c.cfg.SrcBucket + "_" + c.cfg.SrcPrefix + "_" + start.Format("2006-01-02-15:04:05") + ".txt"
+	filename := strings.ReplaceAll(rawFilename, "/", "_")
+	filename = strings.ReplaceAll(filename, "__", "_")
 	file, err := os.Create(filename)
 	if err != nil {
 		panic(err)
